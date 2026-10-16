@@ -13,6 +13,8 @@ pip install repligit
 - Mirror repositories between different Git hosting services.
 - Incrementally archive repositories to disk.
 - Implements Git transfer protocol in pure Python.
+- Automatic retries (exponential backoff) on connection errors, timeouts, and HTTP 429/502/503/504.
+  Every client function takes a `retries` argument (default is 3).
 
 ## Example Usage
 ```python

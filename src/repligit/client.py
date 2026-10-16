@@ -8,6 +8,7 @@ from repligit.exceptions import (
     UnexpectedResponse,
     UnpackFailed,
 )
+from repligit.retry import DEFAULT_RETRIES, retry_sync
 from repligit.parse import (
     generate_fetch_pack_request,
     generate_send_pack_header,
@@ -21,6 +22,7 @@ def http_request(
     username: str | None = None,
     password: str | None = None,
     data: bytes | None = None,
+    retries: int = DEFAULT_RETRIES,
 ) -> HTTPResponse:
     """
     Constructs and executes an HTTP request using urllib. (GET by default,
@@ -32,6 +34,8 @@ def http_request(
         username (str, optional): Username for basic authentication
         password (str, optional): Password for basic authentication
         data (bytes, optional): Data to send in the request body
+        retries (int): Extra attempts after a connection error, timeout, or
+            HTTP 429/502/503/504 (exponential backoff). 0 disables retries.
 
     Returns:
         file-like object: The response file handler from the request
@@ -50,18 +54,23 @@ def http_request(
         for header, value in headers.items():
             request.add_header(header, value)
 
-    return opener.open(request)
+    return retry_sync(
+        lambda: opener.open(request), retries, f"{request.get_method()} {url}"
+    )
 
 
 def ls_remote(
-    url: str, username: str | None = None, password: str | None = None
+    url: str,
+    username: str | None = None,
+    password: str | None = None,
+    retries: int = DEFAULT_RETRIES,
 ) -> dict[str, str]:
     """Get commit hash of remote master branch, return SHA-1 hex string or
     None if no remote commits.
     """
     url = f"{url}/info/refs?service=git-upload-pack"
 
-    resp = http_request(url, username=username, password=password)
+    resp = http_request(url, username=username, password=password, retries=retries)
 
     lines = read_pkt_lines(resp)
     service_line = next(lines)
@@ -82,6 +91,7 @@ def fetch_pack(
     have_shas: Iterable[str],
     username: str | None = None,
     password: str | None = None,
+    retries: int = DEFAULT_RETRIES,
 ) -> HTTPResponse | None:
     """Download a packfile from a remote server."""
     # ensure have_shas is a set, else packfile errors will occur
@@ -98,6 +108,7 @@ def fetch_pack(
         username=username,
         password=password,
         data=request,
+        retries=retries,
     )
 
     line_length = int(resp.read(4), 16)
@@ -121,6 +132,7 @@ def send_pack(
     packfile: BinaryIO,
     username: str | None = None,
     password: str | None = None,
+    retries: int = DEFAULT_RETRIES,
 ) -> None:
     """Send a packfile to a remote server."""
     url = f"{url}/git-receive-pack"
@@ -136,6 +148,7 @@ def send_pack(
         username=username,
         password=password,
         data=receive_pack_request,
+        retries=retries,
     )
 
     lines = read_pkt_lines(resp)
